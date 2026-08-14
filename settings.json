@@ -1,0 +1,177 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/docs_workflow.py\" prompt 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/mem_workflow.py\" prompt 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/docs_workflow.py\" pretool 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/mem_workflow.py\" pretool 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/docs_workflow.py\" posttool 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/mem_workflow.py\" posttool 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/docs_workflow.py\" test 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/mem_workflow.py\" test 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/docs_workflow.py\" stop 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/mem_workflow.py\" stop 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {"type":"command","command":"node \"C:\\\\Users\\\\birru\\\\.kickbacks\\\\vibe-ads-statusline.mjs\"","padding":0},
+  "enabledPlugins": {
+    "hallmark@claude-code-skills": true,
+    "marketing-skills@claude-code-skills": true,
+    "supabase@claude-plugins-official": true,
+    "microsoft-docs@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": true,
+    "llm-wiki@claude-code-skills": true,
+    "superpowers@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "vercel@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "github@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-code-skills": {
+      "source": {
+        "source": "github",
+        "repo": "alirezarezvani/claude-skills"
+      }
+    },
+    "anthropic-agent-skills": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/skills"
+      }
+    }
+  },
+  "spinnerVerbs": {"mode":"replace","verbs":["Ontfly - test your idea before building"]},
+  "effortLevel": "medium",
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  },
+  "theme": "dark",
+  "autoCompactEnabled": true,
+  "agentPushNotifEnabled": true,
+  "voiceEnabled": true,
+  "codex_subprocess": {
+    "enabled": true,
+    "cli_path": "codex",
+    "available": true,
+    "description": "Codex subprocess for heavy tasks (16+ complexity). Separate token budget, no quota drain on Claude Code.",
+    "approval_policy": "on-request",
+    "sandbox_policy": "workspace-write",
+    "note": "Light tasks: codex exec --full-auto | Medium/Heavy: codex -a on-request -s workspace-write",
+    "forbidden_operations": [
+      "DELETE FROM",
+      "DROP TABLE",
+      "DROP DATABASE",
+      "TRUNCATE TABLE",
+      "rm -rf",
+      "git reset --hard",
+      "git push --force",
+      "git branch -D",
+      "git clean -fd",
+      "destructive migration",
+      "DROP COLUMN",
+      "ALTER TABLE DROP",
+      "PRAGMA foreign_keys=OFF",
+      "database.clear()",
+      "shutil.rmtree",
+      "os.remove",
+      "os.rmdir"
+    ],
+    "require_manual_approval": [
+      "database schema changes",
+      "breaking API changes",
+      "git operations",
+      "file deletions",
+      "database migrations",
+      "environment variable changes",
+      "security-related changes"
+    ],
+    "safety_level": "high"
+  },
+  "agent_dispatch": {
+    "enabled": true,
+    "default_parallelism": 3,
+    "default_agent_timeout_seconds": 300,
+    "heavy_task_uses_codex": true,
+    "codex_complexity_threshold": 16
+  },
+  "task_routing": {
+    "enabled": true,
+    "heavy_task_threshold_files": 5,
+    "heavy_task_threshold_complexity_score": 16
+  },
+  "skill_auto_invoke": {
+    "enabled": true,
+    "auto_brainstorm_before_features": true,
+    "auto_verification_on_completion": true
+  }
+}
