@@ -1,0 +1,23 @@
+# Deny-by-default allowlist.
+# This repo tracks only the curated global-config files below.
+# Everything else in ~/.claude/ (credentials, session history, caches,
+# plugin caches, downloaded skill packages, etc.) stays untracked, even
+# if new files/folders are added here later.
+*
+
+!.gitignore
+!CLAUDE.md
+!README.md
+!AGENT-DISPATCH.md
+!hooks.json
+!keybindings.json
+!settings.json
+!skills-lock.json
+!statusline-command.sh
+!statusline-debug.sh
+
+!rules/
+!rules/**
+
+!hooks/
+!hooks/**
