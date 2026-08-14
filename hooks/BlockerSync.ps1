@@ -1,0 +1,270 @@
+#!/usr/bin/env pwsh
+<#
+.SYNOPSIS
+Scans ./mem task files and auto-generates BLOCKERS.md with current blocker status.
+
+.DESCRIPTION
+Finds all "Blockers / Open Questions" sections in task markdown files (YYYYMMDD-*.md),
+extracts blockers, calculates age, and updates BLOCKERS.md organized by file and age.
+
+.PARAMETER MemDir
+Path to memory directory. Defaults to ./mem relative to current directory.
+
+.PARAMETER BlockersFile
+Path to BLOCKERS.md output. Defaults to ./mem/BLOCKERS.md.
+
+.PARAMETER Verbose
+Show detailed logging of found blockers.
+
+.EXAMPLE
+pwsh BlockerSync.ps1
+Updates ./mem/BLOCKERS.md with blockers from all ./mem/YYYYMMDD-*.md files.
+
+.EXAMPLE
+pwsh BlockerSync.ps1 -MemDir "C:\project\mem" -Verbose
+Scans C:\project\mem with detailed output.
+#>
+
+param(
+    [string]$MemDir = "./mem",
+    [string]$BlockersFile = "./mem/BLOCKERS.md",
+    [switch]$Verbose
+)
+
+$ErrorActionPreference = "Stop"
+
+# Helper: Parse YYYYMMDD date string to DateTime
+function ConvertFromYMD {
+    param([string]$DateStr)
+    try {
+        [datetime]::ParseExact($DateStr, "yyyyMMdd", $null)
+    } catch {
+        return $null
+    }
+}
+
+# Helper: Calculate days ago
+function DaysAgo {
+    param([datetime]$Date)
+    $span = (Get-Date) - $Date
+    [int]$span.TotalDays
+}
+
+# Check mem directory exists
+if (-not (Test-Path $MemDir -PathType Container)) {
+    Write-Host "Error: Memory directory not found: $MemDir" -ForegroundColor Red
+    exit 1
+}
+
+# Find all task files (YYYYMMDD-*.md, exclude BLOCKERS.md, DECISIONS.md, *-session.md)
+$taskFiles = @(Get-ChildItem $MemDir -Filter "????????-*.md" -File |
+    Where-Object { $_.Name -notmatch '(BLOCKERS|DECISIONS|session)\.md$' })
+
+if ($taskFiles.Count -eq 0) {
+    Write-Host "No task files found in $MemDir" -ForegroundColor Yellow
+    Write-Host "Example: $MemDir/20250601-my-task.md"
+    exit 0
+}
+
+Write-Host "Found $($taskFiles.Count) task file(s)" -ForegroundColor Cyan
+
+# Parse blockers from each task file
+$blockers = @()
+$fileBlockers = @{}
+$byStatus = @{
+    "Blocked" = @()
+    "In Progress" = @()
+    "Review Pending" = @()
+}
+
+foreach ($file in $taskFiles) {
+    $fileName = $file.Name
+    $content = Get-Content $file.FullName -Raw
+
+    # Extract date from filename (YYYYMMDD-*.md)
+    if ($fileName -match '^(\d{8})') {
+        $dateStr = $matches[1]
+        $taskDate = ConvertFromYMD $dateStr
+        $daysAgoVal = if ($taskDate) { DaysAgo $taskDate } else { 999 }
+    } else {
+        $daysAgoVal = 999
+        $taskDate = $null
+    }
+
+    # Find "Blockers / Open Questions" section (case-insensitive)
+    # Supports: "## Blockers", "### Blockers / Open Questions", etc.
+    if ($content -match '#{2,4}\s*(?:Blockers|Open Questions|Blockers / Open Questions)(.*?)(?:#{2,4}|$)') {
+        $blockerSection = $matches[1].Trim()
+
+        if ($blockerSection.Length -gt 0) {
+            # Extract checkbox items: - [ ] or - [x]
+            $items = @($blockerSection -split "`n" | Where-Object { $_ -match '^\s*-\s+\[.\]' })
+
+            if ($items.Count -gt 0) {
+                if ($Verbose) {
+                    Write-Host "  $fileName ($daysAgoVal days ago): $($items.Count) blocker(s)" -ForegroundColor Green
+                }
+
+                foreach ($item in $items) {
+                    # Parse: - [x] Description
+                    if ($item -match '-\s+\[([ xX])\]\s+(.+)') {
+                        $checked = $matches[1]
+                        $description = $matches[2].Trim()
+                        $isChecked = $checked -eq 'x' -or $checked -eq 'X'
+
+                        # Infer status from checkbox or description
+                        $status = "In Progress"
+                        if ($isChecked) {
+                            $status = "Review Pending"
+                        } elseif ($description -match '(waiting|blocked|pending|stalled)' -i) {
+                            $status = "Blocked"
+                        }
+
+                        $blocker = @{
+                            Description = $description
+                            File = $fileName
+                            Date = $taskDate
+                            DaysAgo = $daysAgoVal
+                            Status = $status
+                            Checked = $isChecked
+                        }
+
+                        $blockers += $blocker
+
+                        if (-not $fileBlockers.ContainsKey($fileName)) {
+                            $fileBlockers[$fileName] = @()
+                        }
+                        $fileBlockers[$fileName] += $blocker
+
+                        $byStatus[$status] += $blocker
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Sort blockers by age (oldest first)
+$blockersByAge = $blockers | Sort-Object -Property @{ Expression = { $_.DaysAgo }; Descending = $true }
+
+# Build BLOCKERS.md content
+$output = @"
+# Open Blockers Across All Tasks
+
+Auto-generated by BlockerSync.ps1 on $(Get-Date -Format "yyyy-MM-dd HH:mm:ss"). Manually editable.
+
+## Summary
+- Total blockers: $($blockers.Count)
+- Files affected: $($fileBlockers.Keys.Count)
+- Blocked: $($byStatus['Blocked'].Count)
+- In Progress: $($byStatus['In Progress'].Count)
+- Review Pending: $($byStatus['Review Pending'].Count)
+
+---
+
+## By File
+<!-- Organized by source file -->
+
+"@
+
+foreach ($fileName in ($fileBlockers.Keys | Sort-Object)) {
+    $count = $fileBlockers[$fileName].Count
+    $output += "`n### $fileName — $count item(s)`n"
+
+    foreach ($blocker in ($fileBlockers[$fileName] | Sort-Object DaysAgo -Descending)) {
+        $checkbox = if ($blocker.Checked) { "[x]" } else { "[ ]" }
+        $statusTag = " _{0}_" -f $blocker.Status
+        $output += "- $checkbox $($blocker.Description)$statusTag`n"
+        $output += "  From: $($blocker.File) ($($blocker.DaysAgo) days ago)`n"
+    }
+}
+
+$output += @"
+
+---
+
+## By Age (oldest first)
+<!-- Sorted by task file date -->
+
+"@
+
+foreach ($blocker in $blockersByAge) {
+    $checkbox = if ($blocker.Checked) { "[x]" } else { "[ ]" }
+    $statusTag = " _{0}_" -f $blocker.Status
+    $output += "`n- $($blocker.DaysAgo) days: $checkbox $($blocker.Description)$statusTag`n"
+    $output += "  From: $($blocker.File)`n"
+}
+
+$output += @"
+
+---
+
+## By Status
+<!-- Categorized by current state -->
+
+### Blocked
+<!-- Waiting on external dependency -->
+
+"@
+
+foreach ($blocker in ($byStatus['Blocked'] | Sort-Object DaysAgo -Descending)) {
+    $checkbox = if ($blocker.Checked) { "[x]" } else { "[ ]" }
+    $output += "- $checkbox $($blocker.Description) (from: $($blocker.File), $($blocker.DaysAgo) days ago)`n"
+}
+
+$output += @"
+
+### In Progress
+<!-- Actively being worked on -->
+
+"@
+
+foreach ($blocker in ($byStatus['In Progress'] | Sort-Object DaysAgo -Descending)) {
+    $checkbox = if ($blocker.Checked) { "[x]" } else { "[ ]" }
+    $output += "- $checkbox $($blocker.Description) (from: $($blocker.File), $($blocker.DaysAgo) days ago)`n"
+}
+
+$output += @"
+
+### Review Pending
+<!-- Awaiting review or decision -->
+
+"@
+
+foreach ($blocker in ($byStatus['Review Pending'] | Sort-Object DaysAgo -Descending)) {
+    $checkbox = if ($blocker.Checked) { "[x]" } else { "[ ]" }
+    $output += "- $checkbox $($blocker.Description) (from: $($blocker.File), $($blocker.DaysAgo) days ago)`n"
+}
+
+$output += @"
+
+---
+
+## Manual Notes
+Add custom notes or cross-links here. Not overwritten by sync:
+
+"@
+
+# Preserve existing manual notes if file exists
+if (Test-Path $BlockersFile) {
+    $existingContent = Get-Content $BlockersFile -Raw
+    if ($existingContent -match '## Manual Notes.*?(.*?)$') {
+        $existingNotes = $matches[1].Trim()
+        if ($existingNotes -and -not ($existingNotes -match '^Add custom notes')) {
+            $output += "`n$existingNotes"
+        }
+    }
+}
+
+# Write output
+Set-Content $BlockersFile -Value $output -Encoding UTF8
+
+$summary = "Updated $BlockersFile`: $($blockers.Count) open item(s) across $($fileBlockers.Keys.Count) file(s)"
+Write-Host $summary -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Breakdown:" -ForegroundColor Gray
+Write-Host "  Blocked: $($byStatus['Blocked'].Count)" -ForegroundColor Yellow
+Write-Host "  In Progress: $($byStatus['In Progress'].Count)" -ForegroundColor Cyan
+Write-Host "  Review Pending: $($byStatus['Review Pending'].Count)" -ForegroundColor Green
+
+exit 0
