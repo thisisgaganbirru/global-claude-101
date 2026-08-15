@@ -262,6 +262,7 @@ git-commit report
 - Merge:            <sha> → <branch> / not merged — <reason>
                     <if no CI in repo: "no CI configured — merged on mergeability only">
 - Gate 3 (post-merge): green <runs> / RED <workflow·job>: <excerpt> / no runs fired
+- Pull:              local <branch> now at <sha>, matches origin / not pulled — <reason>
 - semver label:     <semver:x> applied / not applicable — no such labels in repo
 - Tag:              <vX.Y.Z> / none
 - Docs + mem:       <what applied, per section 6>
