@@ -5,6 +5,8 @@ User-global custom subagent (`~/.claude/agents/git-commit.md`, `name: git-commit
 
 ## Files touched
 - `agents/git-commit.md` — the agent definition (frontmatter + system prompt body).
+- `hooks/merge_guard.py` — `PreToolUse` gate on `gh pr merge`; the enforcement behind "merge only when clean and mergeable".
+- `settings.json` — registers the guard under `hooks.PreToolUse` (matcher `Bash|PowerShell`, `if: "Bash(gh pr merge*)"`) and allows `Bash(gh pr merge:*)`.
 - `skills/code-review-workflow/SKILL.md` — the rulebook, preloaded into the agent via frontmatter `skills:`. Single source of truth for commit/PR/merge/semver discipline; the agent body holds only agent-specific concerns.
 
 ## Behavior
@@ -59,16 +61,32 @@ Notable abort: when the semver bump isn't clearly determinable from the diff, th
 ### Commit message override
 The agent explicitly does **not** append a `Co-Authored-By` trailer. The skill bars it; that's a deliberate user instruction overriding the harness default that would otherwise add one. Called out in both files because a default that reasserts itself silently is the kind of thing nobody notices for twenty commits.
 
+### The merge guard — enforcement, not instruction
+
+The agent is told to merge only when the PR is clean and mergeable. That instruction alone is not a control, and **a permission rule cannot supply one** — permission rules match the command string, not PR state, so `Bash(gh pr merge:*)` would allow the merge unconditionally.
+
+`hooks/merge_guard.py` is the actual gate. It runs as `PreToolUse` on any `gh pr merge`, queries `gh pr view --json number,state,mergeStateStatus,mergeable,title`, and returns `permissionDecision: "deny"` unless the PR is `OPEN` **and** `CLEAN`. Properties:
+
+- **Fails closed** — `gh` missing, subprocess error, non-zero exit, or unparseable JSON all deny. An unverifiable state is never treated as mergeable.
+- **`--admin` is refused outright** — it exists to bypass precisely what the gate enforces.
+- **Only ever subtracts** — on a clean PR it prints a confirmation and exits 0, letting the normal permission flow decide. It never grants permission.
+- **Denial reasons are specific** — `DIRTY` → conflict, `BLOCKED` → missing required review/check, `BEHIND` → stale branch, `UNSTABLE` → failing check, `UNKNOWN` → mergeability still computing.
+
+The agent is instructed that a denial is the system working: report it verbatim and stop, never retry or re-route through another shell. Verified by pipe-test against four cases (non-merge passthrough, live CLEAN PR, `--admin`, nonexistent PR).
+
 **Enforcement mechanism**: every dispatch must end with a required "git-commit report" block (fixed lines, including one per gate) filled in truthfully — including the no-op case. Same reasoning as the `frontend` agent's Pipeline report: a rule with nothing checking it is not a rule, and with no human watching mid-run, a required structured report is the only thing forcing honest self-accounting. "Skipped" is not an allowed value on any line.
 
 ## Known issues / status
 - **Not yet smoke-tested.** No dispatch of this agent has been run. The design is verified only against the repo facts it depends on (workflow triggers, labels, rulesets in both repos were confirmed live via `gh` before writing).
-- **Untested branches**: the `main` target has never been exercised, so the semver-label path, the tag-confirmation step, and the deploy warning are unproven in practice. The dogfood run planned for this change set runs in a repo with no workflows and no `semver:*` labels, so **all three CI gates will report "no runs fired" rather than actually being exercised** — the gating logic stays unproven until this runs somewhere with CI.
+- **Untested branches**: the `main` target has never been exercised, so the semver-label path, the tag-confirmation step, and the deploy warning are unproven in practice.
+- **First dispatch (2026-08-15, target `dev`) surfaced a real detection bug.** This repo has no `.github/` directory at all, so workflow-file inspection classified it as "no CI configured" — but the PR received a live `GitGuardian Security Checks` run from a GitHub App. App checks are invisible to workflow-file inspection, so the agent was one step from reporting *"no CI configured — mergeability only"* on a PR that did have a blocking-capable check: exactly the false report the design exists to prevent. Fixed by making check discovery empirical (`gh pr checks`, `gh api .../check-runs`) with workflow reading demoted to a prediction that observation overrides. Gate 2's checks half was therefore genuinely exercised on the first run; Gate 1 and Gate 3 still reported no runs and remain unproven.
 - **Gate 3 stopping point is unbounded.** In a repo whose post-merge chain fans out (tests → tag → build → deploy), the agent waits for the runs the merge commit started. Chained runs triggered by a *later* event (e.g. a tag push that the merge indirectly caused) are outside the commit-scoped query and won't be waited on. Whether that's the right boundary hasn't been tested against a real multi-stage release chain.
+- **The guard's registration is not committed yet.** `hooks/merge_guard.py` is in the repo but its `settings.json` wiring is not: that file's pending diff also registers `SubagentStart`/`SubagentStop` hooks pointing at `hooks/agent_watch.py`, an unrelated and still-uncommitted concern. Committing it would put hook registrations for a file the repo doesn't have. The guard is therefore **live locally but absent for a fresh clone** until the `agent_watch` change set lands. Harmless in the meantime — an unregistered script does nothing — but it means the enforcement is machine-local, not repo-wide.
 - **Orchestrator contract is convention, not enforcement.** Nothing prevents an orchestrator from dispatching without a target and ignoring the resulting no-op report, or from treating `FOR ORCHESTRATOR` as noise. The inert default limits the damage but does not make misuse impossible.
 - Derived from a review of the pre-fix skill, which had eight defects — no YAML frontmatter (so `skills:` could not resolve it, and its registry description was just its H1), hardcoded `resume-agent` infrastructure behind a false "works in any project" claim, a wrong static CI check list, no mention that merging `main` deploys production, four documented-but-unimplemented flags, and a contradiction between the Adjust checkpoint option and the "cannot modify pushed commits" limitation.
 
 ## Changelog
+- 2026-08-15 · First dispatch (target `dev`). Found the App-check detection bug (below) and two authoring errors. Added `hooks/merge_guard.py` as real enforcement for "clean and mergeable", made check discovery empirical, fixed a section cross-reference off-by-one in the agent body.
 - 2026-08-15 · initial version — agent created, `code-review-workflow` skill rewritten with frontmatter, Modes, target model, capability detection, and abort conditions.
 - 2026-08-15 · Gate 2 split into two conditions — checks green **and** mergeable (`mergeStateStatus`), since green CI on a `BLOCKED` PR still can't merge. Added the no-workflows case: gates collapse to mergeability, report must say so, no locally-manufactured test signal.
 - 2026-08-15 · CI monitoring widened from PR-checks-only to three gates (branch push, PR, post-merge). Post-merge was the real gap: the merge is itself a push, so it starts another round of workflows the agent previously never waited for. Repo-specific examples removed from the skill and doc — the agent is project-independent.
