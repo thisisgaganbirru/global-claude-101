@@ -84,6 +84,18 @@ Two properties are load-bearing:
 - **No `Co-Authored-By` trailer.** This is deliberate and overrides any
   harness default that appends one. If a tool or default behavior adds the
   trailer, remove it before committing.
+- **Configuration that registers a change ships with that change.** If a
+  commit adds a hook, agent, skill, plugin, or service, the config that wires
+  it up (`settings.json`, a manifest, a registry file) belongs in the same
+  commit set. Splitting them lands an inert artifact: a hook file nothing
+  invokes, an agent nothing can dispatch. That is worse than either half
+  alone, because the repository now *looks* like the feature is present.
+- The same holds in reverse: **never commit a registration whose target is
+  not also landing.** Config pointing at a file the repository does not
+  contain is broken for every fresh clone. If a shared config file spans two
+  concerns and cannot be split, the fix is to widen the change set so both
+  land together — not to drop the config and leave the artifact unwired.
+  Say in the report which concerns a shared config file forced together.
 - If the working tree contains several unrelated concerns, that is a scope
   problem, not a commit-organization problem. Interactive mode: ask whether
   to split into separate PRs. Autonomous mode: report the grouping you would
