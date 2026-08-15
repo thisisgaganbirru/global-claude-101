@@ -46,10 +46,17 @@ that aren't ours to version-control — see "External skills" below.
 |---|---|---|
 | `hallmark` | Plugin: `hallmark@claude-code-skills` (`skills-lock.json` pins it to `nutlope/hallmark`) | Reinstalls automatically — it's listed in `settings.json` → `enabledPlugins`, and the marketplace is registered under `extraKnownMarketplaces`. Nothing manual needed once this repo's `settings.json` is in place. |
 | `llm-council` | Standalone repo: `tenfoldmarc/llm-council-skill` | Not a registered plugin — clone it directly into place: `git clone https://github.com/tenfoldmarc/llm-council-skill.git skills/llm-council` |
+| `use-railway` | Railway's own vendor skill, bundled with the Railway MCP integration | Reinstalls with the Railway MCP server — no manual step needed once that's set up. |
 
 Everything else under `skills/` (e.g. `claude-md`, `code-review-workflow`, `docs-audit`,
-`readme-writer`, `use-railway`, `ui-ux-pro-max`, `system-design`, `scrum-master`,
-`senior-tech-lead`, `content-strategist`) is tracked in full.
+`readme-writer`, `ui-ux-pro-max`, `system-design`, `scrum-master`, `senior-tech-lead`,
+`content-strategist`) is tracked in full.
+
+Note: `ui-ux-pro-max` originates from
+[`nextlevelbuilder/ui-ux-pro-max-skill`](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill)
+(also installable via `/plugin marketplace add nextlevelbuilder/ui-ux-pro-max-skill` +
+`/plugin install ui-ux-pro-max@ui-ux`) — kept here in full and modified freely rather than
+tracked as an external dependency.
 
 ## Setup on a new machine
 

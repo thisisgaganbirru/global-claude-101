@@ -33,3 +33,11 @@ skills/hallmark/
 # llm-council is a clone of an external repo (has its own .git/remote) -
 # see README.md "External skills" for the clone command.
 skills/llm-council/
+
+# use-railway is Railway's own vendor skill, bundled with the railway MCP
+# integration - see README.md "External skills" for reinstall instructions.
+skills/use-railway/
+
+# Python build artifacts - never belong in source control.
+__pycache__/
+*.pyc
