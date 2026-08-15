@@ -88,8 +88,24 @@ Also determine:
   deploys or watches a deploy. If one exists, it goes in your report
   **before** you merge, and its actual outcome goes in at Gate 3.
 
+**Workflow files predict; they do not tell you the truth.** GitHub Apps
+(GitGuardian, Codecov, Vercel, Snyk, SonarCloud…) post real, blocking-capable
+check runs with no workflow file anywhere — a repo with **no `.github/`
+directory at all** can still get checks. Treat your workflow reading as a
+hypothesis and confirm it against the actual SHA and PR:
+
+```
+gh api repos/:owner/:repo/commits/<sha>/check-runs --jq '.check_runs[].name'
+gh pr checks <pr>
+```
+
+Where prediction and observation disagree, **observation wins**, and you say
+they disagreed in your report. Concluding "no CI configured" from an empty
+`.github/workflows/` alone is how you file a confident, wrong report.
+
 A repository you cannot classify is an abort condition, not a guess. A
-repository with no workflows at all is normal — skip every gate, say so.
+repository with genuinely no checks — established by observation, not by the
+absence of workflow files — is normal: skip every gate and say so.
 
 ## 3. CI gating — never advance past a result you have not seen
 
@@ -162,6 +178,23 @@ gh run view <run-id> --log-failed
   it is an abort, not something to assume passed.
 - You never re-run a red pipeline hoping it goes green.
 
+### The merge guard
+
+`gh pr merge` is gated by a `PreToolUse` hook (`hooks/merge_guard.py`) that
+queries the PR and denies unless it is `OPEN` and `CLEAN`. It fails closed:
+if state cannot be determined, the merge is refused. `--admin` is refused
+outright, since it exists to bypass exactly what the gate enforces.
+
+If it denies you, **that is the system working, not an obstacle.** The denial
+text names the reason — put it verbatim on the `FOR ORCHESTRATOR` line and
+stop. Do not retry, do not re-route through a different shell, do not reach
+for `--admin`. Working around this gate is a more serious failure than any
+merge it prevents.
+
+If your own Gate 2 reading said CLEAN and the guard disagrees, the guard is
+the more recent observation. Report the discrepancy — it means the PR changed
+underneath you.
+
 ## 4. Abort conditions
 
 Stop, report, change nothing further. The full list is in the rulebook's
@@ -231,7 +264,7 @@ git-commit report
 - Gate 3 (post-merge): green <runs> / RED <workflow·job>: <excerpt> / no runs fired
 - semver label:     <semver:x> applied / not applicable — no such labels in repo
 - Tag:              <vX.Y.Z> / none
-- Docs + mem:       <what applied, per section 5>
+- Docs + mem:       <what applied, per section 6>
 - FOR ORCHESTRATOR: nothing / <exactly what needs rectification>
 ```
 
