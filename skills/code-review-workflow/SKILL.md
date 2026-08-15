@@ -186,8 +186,33 @@ Two consequences that are easy to get wrong:
 - Merging is a push. Anything under `push: branches: [<target>]` starts
   **after** the merge, not before it. A merge is not the end of CI.
 
-A repository with no workflows at all is a valid, common outcome. Detect it,
-say so, and skip every CI wait — do not treat absence as failure.
+### Workflow files are not the whole picture
+
+**Reading `.github/workflows/` tells you what *this repository* runs. It does
+not tell you what checks the PR will actually get.** GitHub Apps — GitGuardian,
+Codecov, Vercel, Snyk, SonarCloud, Dependabot and others — post check runs
+without any workflow file, and are installed at the account or repo level
+where no file inspection can see them. A repository with **no `.github/`
+directory at all** can still get real, blocking-capable checks.
+
+So workflow inspection is a *prediction*, useful before a PR exists. Once a
+SHA is pushed or a PR is open, replace the prediction with observation:
+
+```
+gh api repos/:owner/:repo/commits/<sha>/check-runs --jq '.check_runs[].name'
+gh pr checks <pr>
+```
+
+Trust the empirical result over the predicted one wherever they disagree, and
+say in the report that they disagreed.
+
+Concluding "no CI configured" from an empty `.github/workflows/` alone is how
+you file a confident, wrong report — precisely the failure this workflow
+exists to prevent. Absence of workflow files is evidence, not proof.
+
+A repository with genuinely no checks is a valid, common outcome. Establish it
+by observation, say so, and skip every CI wait — do not treat absence as
+failure.
 
 ## CI monitoring
 
@@ -200,20 +225,28 @@ unknown state.
 
 ### Gate 1 — after pushing the working branch, before raising the PR
 
-Pushing the branch may itself start workflows (anything matching
-`push: branches: ['**']` or the branch's name). If any run starts for the
-pushed SHA, wait for it. Do not open the PR while branch CI is still running,
-and do not open it at all if branch CI failed.
+Pushing the branch may itself start workflows, and may attract App check runs
+that no workflow file mentions. Ask the SHA directly rather than inferring:
 
-If nothing fires for that SHA, there is nothing to wait for — proceed.
+```
+gh run list --commit <sha> --json databaseId,name,status,conclusion
+gh api repos/:owner/:repo/commits/<sha>/check-runs --jq '.check_runs[].name'
+```
+
+If anything starts for that SHA, wait for it. Do not open the PR while branch
+CI is still running, and do not open it at all if branch CI failed.
+
+If nothing fires for that SHA after the grace period, there is nothing to wait
+for — proceed.
 
 ### Gate 2 — on the pull request, before merging
 
 Two conditions, both required. They are different things and passing one says
 nothing about the other:
 
-1. **Checks green** — the checks that actually apply to this PR's target
-   branch, derived from workflow triggers.
+1. **Checks green** — every check the PR actually received, read from the PR
+   itself via `gh pr checks <n>`, not the list predicted from workflow files.
+   App checks appear here and nowhere else.
 2. **Mergeable** — GitHub itself considers the PR ready to merge.
 
 ```
