@@ -37,12 +37,24 @@ gets permanently lost to one bad command.
 — useful locally, not meant to travel), and any machine-specific or secret state. This repo
 is portable config, not a full backup of runtime state.
 
-`skills/` is also excluded — it's largely third-party plugin content (e.g. `hallmark`,
-`ui-ux-pro-max`) that reinstalls automatically from `settings.json`'s `enabledPlugins` list
-on a new machine, so duplicating it here would just be dead weight.
+`skills/` is tracked (these are curated/authored skills), **except** two external ones
+that aren't ours to version-control — see "External skills" below.
+
+### External skills (not in this repo — reinstall after cloning)
+
+| Skill | Source | How to get it |
+|---|---|---|
+| `hallmark` | Plugin: `hallmark@claude-code-skills` (`skills-lock.json` pins it to `nutlope/hallmark`) | Reinstalls automatically — it's listed in `settings.json` → `enabledPlugins`, and the marketplace is registered under `extraKnownMarketplaces`. Nothing manual needed once this repo's `settings.json` is in place. |
+| `llm-council` | Standalone repo: `tenfoldmarc/llm-council-skill` | Not a registered plugin — clone it directly into place: `git clone https://github.com/tenfoldmarc/llm-council-skill.git skills/llm-council` |
+
+Everything else under `skills/` (e.g. `claude-md`, `code-review-workflow`, `docs-audit`,
+`readme-writer`, `use-railway`, `ui-ux-pro-max`, `system-design`, `scrum-master`,
+`senior-tech-lead`, `content-strategist`) is tracked in full.
 
 ## Setup on a new machine
 
 1. Install Claude Code, let it create `~/.claude/`.
 2. Clone this repo's tracked files into `~/.claude/` (or symlink individual files in).
 3. Plugins listed in `settings.json` → `enabledPlugins` reinstall on next launch.
+4. Clone `llm-council` manually (see "External skills" above — it's not a plugin, so it
+   won't reinstall itself): `git clone https://github.com/tenfoldmarc/llm-council-skill.git skills/llm-council`

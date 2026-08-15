@@ -21,3 +21,15 @@
 
 !hooks/
 !hooks/**
+
+!skills/
+!skills/**
+
+# hallmark is a third-party skill package (also installed as a plugin,
+# reinstalls itself from settings.json's enabledPlugins) - not yours to
+# version-control, and it's 26MB+ of redistributed content.
+skills/hallmark/
+
+# llm-council is a clone of an external repo (has its own .git/remote) -
+# see README.md "External skills" for the clone command.
+skills/llm-council/
