@@ -1,4 +1,5 @@
 {
+  "model": "opus[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -30,6 +31,17 @@
           {
             "type": "command",
             "command": "python \"$HOME/.claude/hooks/mem_workflow.py\" pretool 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(gh pr merge*)",
+            "command": "python \"$HOME/.claude/hooks/merge_guard.py\"",
+            "statusMessage": "Verifying PR is clean and mergeable"
           }
         ]
       }
@@ -75,9 +87,45 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/docs_workflow.py\" prompt 2>/dev/null | sed 's/\"UserPromptSubmit\"/\"SubagentStart\"/' || true"
+          },
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/mem_workflow.py\" prompt 2>/dev/null | sed 's/\"UserPromptSubmit\"/\"SubagentStart\"/' || true"
+          },
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/agent_watch.py\" start 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/docs_workflow.py\" stop 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/mem_workflow.py\" stop 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python \"$HOME/.claude/hooks/agent_watch.py\" stop 2>/dev/null || true"
+          }
+        ]
+      }
     ]
   },
-  "statusLine": {"type":"command","command":"node \"C:\\\\Users\\\\birru\\\\.kickbacks\\\\vibe-ads-statusline.mjs\"","padding":0},
+  "statusLine": {"type":"command","command":"bash ~/.claude/statusline-command.sh"},
   "enabledPlugins": {
     "hallmark@claude-code-skills": true,
     "marketing-skills@claude-code-skills": true,
@@ -109,8 +157,7 @@
       }
     }
   },
-  "spinnerVerbs": {"mode":"replace","verbs":["Ontfly - test your idea before building"]},
-  "effortLevel": "medium",
+  "effortLevel": "high",
   "voice": {
     "enabled": true,
     "mode": "hold"
@@ -173,5 +220,11 @@
     "enabled": true,
     "auto_brainstorm_before_features": true,
     "auto_verification_on_completion": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr merge *)"
+    ]
   }
 }

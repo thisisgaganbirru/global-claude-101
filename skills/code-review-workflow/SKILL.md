@@ -1,240 +1,412 @@
-# Code Review & Merge Workflow Skill
+---
+name: code-review-workflow
+description: >
+  Branch, commit, PR, and merge discipline for git repositories using a
+  feature → dev → main promotion flow. Use whenever work needs to be turned
+  into commits and shipped: organizing a dirty working tree into logical
+  commits, creating a feature branch, raising a pull request, monitoring CI
+  on a PR, merging to dev, promoting dev to main, or applying release
+  (semver) labels. Also use when the user says "commit this", "raise a PR",
+  "merge to dev", "promote to main", "ship this", "cut a release", or asks
+  why a PR is blocked from merging. Covers both interactive use (a human
+  approving at checkpoints) and autonomous use (the `git-commit` agent, gated
+  by an explicit target instead of checkpoints). Does NOT review code for
+  correctness — that is `/code-review`.
+---
 
-## Description
-Automated hybrid workflow for organizing code changes, creating branches, managing PRs, and merging to dev/main with checkpoints for review and approval.
+# Code Review & Merge Workflow
 
-## Usage
+Discipline for turning a working tree into commits, a PR, and a merge, across
+a `feature → dev → main` promotion flow.
+
+This file is the **rulebook**. It is consumed two ways:
+
+- **Interactive mode** — a human invokes `/code-review-workflow` and approves
+  at checkpoints.
+- **Autonomous mode** — the `git-commit` agent preloads this file via its
+  `skills:` frontmatter and executes it without checkpoints.
+
+Read [Modes](#modes) before anything else. Several rules below differ by mode,
+and applying the wrong one is the main way this workflow goes wrong.
+
+## Modes
+
+| | Interactive | Autonomous |
+|---|---|---|
+| Invoked by | a human typing `/code-review-workflow` | an orchestrator dispatching `git-commit` |
+| Scope authorized by | checkpoints, mid-run | the **target** argument, at dispatch time |
+| On ambiguity | ask the user | stop and report to the orchestrator |
+| Can fix code / CI failures | yes, if the user asks | **never** — report only |
+
+**Why autonomous mode has no checkpoints.** A dispatched subagent runs to
+completion and returns a report; it cannot pause and ask for approval
+mid-run. Rather than pretend otherwise, the gate moves earlier: the
+orchestrator authorizes a scope by choosing a target, and the agent may not
+exceed it. A dispatch with no target does nothing at all.
+
+**Precedence.** In autonomous mode, the target model below replaces the
+Checkpoints section entirely. Where the two conflict, the target model wins,
+and the agent must say so in its report rather than silently picking one.
+
+## Targets (autonomous mode)
+
+| Target | Runs | Stops after |
+|---|---|---|
+| *(none given)* | **nothing** — reports "no target specified", makes zero writes | immediately |
+| `commit` | preflight → branch → 2–6 logical commits → push → **Gate 1** | branch CI reported |
+| `dev` | the above, then PR → `dev` → **Gate 2** → merge → **Gate 3** → pull `dev` | post-merge CI reported |
+| `main` | verify source is `dev` and ahead of `main` → semver label → PR `dev` → `main` → **Gate 2** → merge → **Gate 3** → pull, confirm tag | post-merge CI reported |
+
+Two properties are load-bearing:
+
+- **The default is inert.** An absent, misspelled, or ambiguous target is not
+  "assume `commit`". It is do nothing. Ambiguity must never cause a write.
+- **Targets do not cascade backwards.** `main` does not silently perform the
+  `dev` leg if it was never done. It checks, finds `dev` is not ahead of
+  `main`, reports, and stops.
+
+## Phase 1 — Analyze & organize
+
+1. Run preflight (see [Repository capability detection](#repository-capability-detection)).
+2. Analyze `git status` and the diff; group related changes.
+3. Create a feature branch with a descriptive name.
+4. Organize into **2–6 logical commits**.
+5. Push to remote.
+6. **Gate 1** — if the push started any workflow, wait for it. Green →
+   continue. Red → stop and report. See [CI monitoring](#ci-monitoring).
+
+### Commit rules
+
+- 2–6 commits per PR, each one coherent on its own. Examples:
+  "Add feature X types and API", "Implement feature X logic",
+  "Update UI for feature X", "Add tests for feature X".
+- Short, clear, imperative subjects.
+- **No `Co-Authored-By` trailer.** This is deliberate and overrides any
+  harness default that appends one. If a tool or default behavior adds the
+  trailer, remove it before committing.
+- **Configuration that registers a change ships with that change.** If a
+  commit adds a hook, agent, skill, plugin, or service, the config that wires
+  it up (`settings.json`, a manifest, a registry file) belongs in the same
+  commit set. Splitting them lands an inert artifact: a hook file nothing
+  invokes, an agent nothing can dispatch. That is worse than either half
+  alone, because the repository now *looks* like the feature is present.
+- The same holds in reverse: **never commit a registration whose target is
+  not also landing.** Config pointing at a file the repository does not
+  contain is broken for every fresh clone. If a shared config file spans two
+  concerns and cannot be split, the fix is to widen the change set so both
+  land together — not to drop the config and leave the artifact unwired.
+  Say in the report which concerns a shared config file forced together.
+- If the working tree contains several unrelated concerns, that is a scope
+  problem, not a commit-organization problem. Interactive mode: ask whether
+  to split into separate PRs. Autonomous mode: report the grouping you would
+  use and stop — the orchestrator owns scope.
+
+## Phase 2 — Checkpoint 1 (interactive mode only)
+
+⛔ Review commits before a PR exists. The user may:
+Proceed · Review (show diffs) · Adjust · Abort.
+
+**Adjust, and the force-push rule.** Before the branch is pushed, amend and
+reorder freely. **After** it is pushed, changes are new commits — never a
+force-push, never a rewrite of pushed history. This workflow never squashes
+and never deletes branches precisely so that history stays a reliable base
+for cherry-picks; rewriting it after push defeats that. If a change genuinely
+requires rewriting pushed history, stop and hand it to the user.
+
+## Phase 3 — Dev merge
+
+1. Create PR from feature branch → `dev` (only if Gate 1 was green).
+2. **Gate 2** — monitor the checks that actually apply to this PR. Do not wait
+   on a check that will never run for this target branch.
+3. Merge only when they are all green.
+4. **Gate 3** — the merge is a push to `dev`; wait for the workflows it
+   started and report their outcome.
+5. Pull to local `dev`.
+
+## Phase 4 — Checkpoint 2 (interactive mode only)
+
+⛔ Review everything on `dev` before promoting. Approve · Skip main · Review · Abort.
+
+In autonomous mode this gate does not exist; promotion happens only because
+the orchestrator dispatched `target: main`, which is the same authorization
+expressed earlier.
+
+## Phase 5 — Main merge
+
+1. Verify `dev` is the source and is ahead of `main`.
+2. Create PR from `dev` → `main`.
+3. Apply exactly one `semver:*` label **if the repository uses them** — see
+   [Release labeling](#release-labeling).
+4. **Gate 2** — monitor applicable checks; merge only when green.
+5. Merge, pull to local `main`.
+6. **Gate 3** — the merge is a push to `main`. Wait for what it started
+   (post-merge tests, tagging, image builds, deploys) and report each outcome.
+7. Confirm any release tag was cut.
+
+⚠️ **Merging to `main` can deploy production.** Preflight detects workflows
+triggered by `push` to `main`. If any exist, say so explicitly **before**
+merging, not after — and then report the actual result at Gate 3 rather than
+assuming it succeeded. See
+[Repository capability detection](#repository-capability-detection).
+
+## Repository capability detection
+
+This workflow makes **no assumptions** about what infrastructure a repository
+has. Two repositories using it can look nothing alike. Detect, then adapt.
+
+Run these before any write:
 
 ```
-/code-review-workflow
+git status --porcelain            git branch -a
+git branch --show-current         git remote -v
+git log --oneline <base>..HEAD    gh auth status
+ls .github/workflows/             gh label list
+gh api repos/:owner/:repo/rulesets
 ```
 
-Optionally with parameters:
+Build a profile from the results:
+
+| Field | How to determine it | What it changes |
+|---|---|---|
+| `dev` / `main` exist | `git branch -a` | whether a target is even runnable |
+| checks applying to this PR | each workflow's `on: pull_request: branches:` | what to wait on at Gate 2 |
+| workflows fired by a branch push | `on: push:` matching the working branch | what to wait on at Gate 1 |
+| workflows fired by a merge | `on: push: branches: [<merge target>]` | what to wait on at Gate 3 |
+| `semver:*` labels exist | `gh label list` | whether Phase 5 step 3 applies at all |
+| required status checks | `gh api …/rulesets` | what will block the merge |
+| merging deploys anything | push-triggered workflows that deploy or watch a deploy | what to warn about before merging |
+
+A repository that cannot be classified is an abort condition, not a guess.
+
+### Reading workflow triggers
+
+Every repository wires CI differently. Never assume; read each workflow's
+`on:` block and classify it:
+
+| Trigger | Fires when | Consequence |
+|---|---|---|
+| `pull_request: branches: [X]` | a PR **targeting X** opens or updates | only applies if this PR targets X |
+| `push: branches: [Y]` | any commit lands on Y — **including a merge** | fires *after* you merge into Y |
+| `push: branches: ['**']` | every branch push | fires when the working branch is pushed, before any PR |
+| `push: tags: [...]` | a tag is pushed | fires after a release tag is cut |
+| `schedule` / `workflow_dispatch` | on a timer / manually | never wait on these |
+
+Two consequences that are easy to get wrong:
+
+- A workflow scoped to PRs into `main` will **never** run on a PR into `dev`.
+  Waiting for it there hangs forever.
+- Merging is a push. Anything under `push: branches: [<target>]` starts
+  **after** the merge, not before it. A merge is not the end of CI.
+
+### Workflow files are not the whole picture
+
+**Reading `.github/workflows/` tells you what *this repository* runs. It does
+not tell you what checks the PR will actually get.** GitHub Apps — GitGuardian,
+Codecov, Vercel, Snyk, SonarCloud, Dependabot and others — post check runs
+without any workflow file, and are installed at the account or repo level
+where no file inspection can see them. A repository with **no `.github/`
+directory at all** can still get real, blocking-capable checks.
+
+So workflow inspection is a *prediction*, useful before a PR exists. Once a
+SHA is pushed or a PR is open, replace the prediction with observation:
+
 ```
-/code-review-workflow --skip-main
-/code-review-workflow --dev-only
+gh api repos/:owner/:repo/commits/<sha>/check-runs --jq '.check_runs[].name'
+gh pr checks <pr>
 ```
 
-## Workflow Overview
+Trust the empirical result over the predicted one wherever they disagree, and
+say in the report that they disagreed.
 
-### Phase 1: Analyze & Organize (Automated)
-1. Check git status and analyze changes
-2. Understand scope and logical grouping
-3. Create feature branch with descriptive name
-4. Organize changes into 2-6 focused commits
-5. Push to remote
+Concluding "no CI configured" from an empty `.github/workflows/` alone is how
+you file a confident, wrong report — precisely the failure this workflow
+exists to prevent. Absence of workflow files is evidence, not proof.
 
-### Phase 2: Review Checkpoint (Manual Approval)
-- ⛔ CHECKPOINT 1: Review commits before creating PR
-- User approves or requests changes
+A repository with genuinely no checks is a valid, common outcome. Establish it
+by observation, say so, and skip every CI wait — do not treat absence as
+failure.
 
-### Phase 3: Dev Merge (Automated)
-1. Create PR from feature branch → dev
-2. Monitor CI tests (Backend, Frontend, Security)
-3. Merge when all tests pass
-4. Pull changes to local dev
+## CI monitoring
 
-### Phase 4: Review Checkpoint (Manual Approval)
-- ⛔ CHECKPOINT 2: Review dev changes before main PR
-- User approves or skips main merge
+**The rule: never advance past CI you haven't seen the result of.** Green →
+proceed to the next action. Not green → stop and report. This applies at
+every point where CI can run, not just on the pull request.
 
-### Phase 5: Main Merge (Automated)
-1. Create PR from dev → main
-2. Apply a `semver:major` / `semver:minor` / `semver:patch` label to the PR (required — see Release Labeling below)
-3. Monitor CI tests
-4. Merge when all tests pass
-5. Pull changes to local main
+There are **three** such points. Missing any of them means acting on an
+unknown state.
 
-## Execution Details
+### Gate 1 — after pushing the working branch, before raising the PR
 
-### Commit Organization Logic
-- Analyze diffs to group related changes
-- Create 2-6 logical commits per PR
-- Examples:
-  - "Add feature X types and API"
-  - "Implement feature X logic"
-  - "Update UI for feature X"
-  - "Add tests for feature X"
-- NO Co-Authored-By in messages
-- Short, clear commit messages
+Pushing the branch may itself start workflows, and may attract App check runs
+that no workflow file mentions. Ask the SHA directly rather than inferring:
 
-### PR Creation
-- Meaningful title (what was done)
-- Detailed body (why, what changed, testing)
-- Reference related features/issues
-- For dev → main PRs only: apply exactly one `semver:major|minor|patch` label (see Release Labeling)
+```
+gh run list --commit <sha> --json databaseId,name,status,conclusion
+gh api repos/:owner/:repo/commits/<sha>/check-runs --jq '.check_runs[].name'
+```
 
-### Release Labeling (dev → main PRs only)
-Commits here are never squashed, so there is no single clean commit/PR-title
-to parse for release intent the way squash-merge workflows do — the label
-*is* the signal, and it's the only place release intent lives. `dev` itself
+If anything starts for that SHA, wait for it. Do not open the PR while branch
+CI is still running, and do not open it at all if branch CI failed.
+
+If nothing fires for that SHA after the grace period, there is nothing to wait
+for — proceed.
+
+### Gate 2 — on the pull request, before merging
+
+Two conditions, both required. They are different things and passing one says
+nothing about the other:
+
+1. **Checks green** — every check the PR actually received, read from the PR
+   itself via `gh pr checks <n>`, not the list predicted from workflow files.
+   App checks appear here and nowhere else.
+2. **Mergeable** — GitHub itself considers the PR ready to merge.
+
+```
+gh pr view <n> --json mergeable,mergeStateStatus,reviewDecision
+```
+
+| `mergeStateStatus` | Meaning | Action |
+|---|---|---|
+| `CLEAN` | mergeable, nothing blocking | merge |
+| `UNKNOWN` | GitHub still computing | poll — not yet an answer |
+| `DIRTY` | merge conflict | abort, report |
+| `BLOCKED` | required review or required check missing | abort, report **what** is blocking |
+| `BEHIND` | branch is behind the target | abort, report |
+| `UNSTABLE` | mergeable but checks failing | abort, report |
+
+All checks green with `BLOCKED` still cannot merge — a ruleset may require a
+review that no amount of green CI satisfies. Never force or admin-override a
+blocked merge; that is the orchestrator's decision, not this workflow's.
+
+### Gate 3 — after merging, before reporting done
+
+**A merge is a push.** Merging into a branch starts every workflow under
+`push: branches: [<that branch>]` — post-merge tests, image builds, release
+tagging, deploys. These run *after* the merge and are frequently where a
+problem actually surfaces.
+
+Wait for the runs triggered by the merge commit, and report their outcome.
+"Merged successfully" while post-merge CI is failing is a false report.
+
+Gate 3 cannot prevent a bad merge — by then it has happened. Its purpose is
+that the orchestrator learns the truth immediately, in the same report,
+instead of discovering it later.
+
+### When the repository has no workflows
+
+Common and entirely valid. No CI exists to wait for, so:
+
+- Gate 1 has nothing to fire — push and proceed straight to the PR.
+- Gate 2 collapses to **mergeability alone** — the table above is the whole
+  gate. `CLEAN` merges; anything else aborts.
+- Gate 3 has nothing to report.
+
+Two rules for this case:
+
+- **Say it explicitly in the report.** "Merged — no CI configured in this
+  repository, mergeability only." The orchestrator must be able to tell the
+  difference between *validated and passed* and *nothing validated it*.
+  Silence here reads as the former.
+- **Do not compensate.** Never run tests, linters, or builds locally to
+  manufacture a signal the repository does not produce. That is outside this
+  workflow's boundary, and a locally-invented green reads in the report like
+  validation that never happened.
+
+### Mechanics
+
+Repository-agnostic; these work anywhere `gh` is authenticated:
+
+```
+gh run list --commit <sha> --json databaseId,name,status,conclusion
+gh run watch <run-id> --exit-status
+gh pr checks <pr> --watch --fail-fast
+gh pr view <pr> --json mergeable,mergeStateStatus,reviewDecision
+gh run view <run-id> --log-failed
+```
+
+- Poll for runs to *appear* before concluding none exist — a run can take a
+  few seconds to register after a push. Only after a short grace period is
+  "no runs" a real answer.
+- Every wait needs a timeout. A check that never reaches a terminal state
+  within it is an abort condition — report it, do not merge.
+- On failure, capture the failing workflow, the job name, and a log excerpt.
+- Interactive mode may offer to fix. **Autonomous mode reports and stops — it
+  never fixes code, never re-runs a red pipeline, never merges anyway.**
+
+## Release labeling
+
+Applies to `dev` → `main` PRs, in repositories that define `semver:*` labels.
+
+Commits here are never squashed, so there is no single clean commit or PR
+title to parse release intent from the way squash-merge workflows do — the
+label *is* the signal, and the only place release intent lives. `dev` itself
 carries no version semantics (nightly staging, not a release).
+
 - `semver:major` — breaks an existing consumer (removed/renamed endpoint,
-  incompatible response shape change, auth behavior change)
-- `semver:minor` — new backwards-compatible functionality (new endpoint,
-  new optional field, new feature)
+  incompatible response shape, auth behavior change)
+- `semver:minor` — new backwards-compatible functionality (new endpoint, new
+  optional field, new feature)
 - `semver:patch` — bug fix or internal change, no interface change
-- Judge by the PR's actual diff into main, not by how many files it touched
-  or how long it took to build — size isn't the criterion, compatibility is.
-- If unsure, ask the user rather than guessing.
-- **This is enforced, not optional** (as of 2026-08-09): `main` has a
-  repository ruleset requiring a PR (no direct pushes) and a required
-  `semver-label-check.yml` status check that fails without exactly one
-  `semver:*` label. Phase 5 will not be able to merge without it — apply
-  the label before attempting merge, not after it's already blocked.
-  On merge, `release-tag.yml` auto-computes and pushes the `vX.Y.Z` tag.
 
-### CI Monitoring
-- Check all status checks
-- Wait for completion
-- Show failures with context
-- Offer retry/fix options
+Judge by the PR's actual diff into `main`, not by how many files it touched or
+how long it took to build — size is not the criterion, compatibility is.
 
-### Error Handling
-- Test failures: Show logs and suggest fixes
-- Merge conflicts: Report and suggest manual resolution
-- Network issues: Retry logic with backoff
-- Invalid state: Clear error messages
+**When the bump is unclear:** interactive mode asks the user. Autonomous mode
+has nobody to ask mid-run, so it reports both candidate bumps with reasoning
+and stops. It never guesses.
+
+Where a ruleset requires the label, applying it is not optional and not
+something to retrofit after the merge is already blocked — apply it when the
+PR is created.
+
+## Invariants
+
+These hold in every mode and every repository:
+
+- Commits are **never squashed** — preserves history for precise cherry-picks.
+- Branches are **never deleted** — safe for recovery.
+- Merges are fresh commits — no fast-forward-only.
+- Pushed history is **never rewritten** — no force-push, no amend after push.
+- No `Co-Authored-By` trailer.
 
 ## Parameters
 
 | Flag | Effect | Default |
-|------|--------|---------|
-| `--skip-main` | Stop after dev merge | false |
-| `--dev-only` | Skip to dev PR creation | false |
-| `--force-merge` | Skip checkpoints (dangerous) | false |
+|---|---|---|
 | `--branch-name` | Custom branch name | auto-generated |
 
-## Checkpoint Approvals
+Interactive mode only. Autonomous mode takes a **target** (`commit`, `dev`,
+`main`), not flags — the target is the authorization.
 
-At each checkpoint, user can:
-- ✅ **Proceed** - Continue to next phase
-- 🔄 **Review** - Show diffs again
-- ✏️ **Adjust** - Recommend changes (I modify and wait)
-- ⏸️ **Abort** - Stop workflow
+`--skip-main`, `--dev-only`, and `--force-merge` were removed. The first two
+are expressed by choosing a target. `--force-merge` existed to skip
+checkpoints; in autonomous mode there are none to skip, and in interactive
+mode "skip the human gates" is what invoking the workflow without them
+already means.
 
-## Success Criteria
+## Abort conditions
 
-Workflow completes successfully when:
-- ✅ All commits organized and pushed
-- ✅ Feature branch → dev PR merged
-- ✅ Dev → main PR merged, with a `semver:*` label applied
-- ✅ Both local branches synced
-- ✅ No failing tests or conflicts
+Stop and report. Do not work around any of these:
+
+- No target given (autonomous mode) — do nothing at all
+- Working tree contains files outside the stated scope
+- `dev` or `main` missing when the target requires it
+- No remote, or `gh` not authenticated
+- CI red **at any of the three gates** — report failing workflow, job, and log
+  excerpt; never re-run, never merge anyway
+- A workflow that never reaches a terminal state within the timeout
+- PR not mergeable — `DIRTY`, `BLOCKED`, `BEHIND`, or `UNSTABLE`. Report which,
+  and what is blocking. Never force or admin-override.
+- Merge conflict
+- `main` requested but `dev` is not the source, or is not ahead of `main`
+- An expected check never appears within the timeout
+- The change would require a force-push
+- `main` requested, repository requires a semver label, and the diff does not
+  clearly indicate the bump
 
 ## Limitations
 
-- Requires: git, gh CLI, clean working directory
-- Cannot: Handle complex merge conflicts (manual required)
-- Cannot: Override CI policy blocks (need approval/admin)
-- Cannot: Modify commits after push (would need force push)
-
-## Examples
-
-### Standard Full Workflow
-```
-/code-review-workflow
-→ Analyze changes
-→ Create branch & organize commits
-⛔ CHECKPOINT 1: Review?
-→ Create PR to dev
-→ Merge to dev
-⛔ CHECKPOINT 2: Ready for main?
-→ Create PR to main
-→ Merge to main
-✅ Done
-```
-
-### Dev Only
-```
-/code-review-workflow --dev-only
-→ Skip to dev PR creation
-→ Create PR to dev
-→ Merge to dev
-✅ Done
-```
-
-### Fast Mode (No Checkpoints)
-```
-/code-review-workflow --force-merge
-⚠️ WARNING: Skips all approvals
-→ Full workflow without checkpoints
-⚠️ Use only for trusted changes
-```
-
-## Integration with Projects
-
-Works with:
-- resume-agent
-- Any other project with git + gh CLI
-- GitHub-based repositories
-- Standard node/python/go projects
-
-No project-specific setup needed. Just run `/code-review-workflow` in any project.
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| "No changes detected" | Make sure you have modified files |
-| "Branch already exists" | Delete old branch or use `--branch-name` |
-| "Tests failing" | Fix issues locally, push new commit, retry |
-| "Merge conflict" | Manual resolution required, then retry |
-| "CI blocked" | May need approvals in GitHub settings |
-
-## Workflow Diagram
-
-```
-START
-  ↓
-[Analyze Changes] ✅ Auto
-  ↓
-[Create Branch & Commits] ✅ Auto
-  ↓
-[Push to Remote] ✅ Auto
-  ↓
-⛔ CHECKPOINT 1: Review?
-  ├→ Approve → Continue
-  ├→ Review → Show diffs
-  ├→ Adjust → Modify & wait
-  └→ Abort → Stop
-  ↓
-[Create PR to Dev] ✅ Auto
-  ↓
-[Wait for CI] ✅ Auto
-  ↓
-[Merge to Dev] ✅ Auto
-  ↓
-⛔ CHECKPOINT 2: Ready for Main?
-  ├→ Approve → Continue
-  ├→ Skip → End
-  ├→ Review → Show changes
-  └→ Abort → Stop
-  ↓
-[Create PR to Main] ✅ Auto
-  ↓
-[Wait for CI] ✅ Auto
-  ↓
-[Merge to Main] ✅ Auto
-  ↓
-END ✅ Complete
-```
-
-## Notes
-
-- Checkpoint 1 lets you review commits before they become a PR
-- Checkpoint 2 lets you review all dev changes before main merge
-- All CI waiting is automated (no manual monitoring needed)
-- Commits are NEVER squashed (preserves history, needed for precise cherry-picks)
-- Branches are NEVER deleted (safe for recovery)
-- Each merge is a fresh commit (no fast-forward only)
-- dev → main PRs carry release intent as a `semver:*` label, not a commit-message
-  convention — see Release Labeling under Phase 5
-
-## Support
-
-If workflow fails:
-1. Check error message for context
-2. Fix the underlying issue
-3. Retry with same command
-4. Or manual intervention if needed
+- Requires `git` and the `gh` CLI.
+- Cannot resolve merge conflicts.
+- Cannot override ruleset or required-check policy — that needs repo admin.
+- Cannot modify pushed commits (would require force-push, which is barred).
