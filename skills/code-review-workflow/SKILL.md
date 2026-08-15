@@ -116,6 +116,8 @@ requires rewriting pushed history, stop and hand it to the user.
 ## Phase 3 — Dev merge
 
 1. Create PR from feature branch → `dev` (only if Gate 1 was green).
+   **Always pass the base explicitly** (`gh pr create --base dev`). Never rely
+   on the repository's default branch — see below.
 2. **Gate 2** — monitor the checks that actually apply to this PR. Do not wait
    on a check that will never run for this target branch.
 3. Merge only when they are all green.
@@ -197,6 +199,32 @@ Two consequences that are easy to get wrong:
   Waiting for it there hangs forever.
 - Merging is a push. Anything under `push: branches: [<target>]` starts
   **after** the merge, not before it. A merge is not the end of CI.
+
+### Never infer a PR base from the default branch
+
+In this promotion model the default branch and the integration branch are
+**different on purpose**: `main` is the default and the release branch, `dev`
+is where work is integrated and tested. Feature PRs target `dev`; only `dev`
+targets `main`.
+
+So the repository default is the *wrong* base for every feature PR, and
+`gh pr create` without `--base` silently uses it. Always state the base:
+
+```
+gh pr create --base dev   …   # feature → dev
+gh pr create --base main  …   # dev → main (promotion only)
+```
+
+Two further traps worth knowing:
+
+- `refs/remotes/origin/HEAD` is a **local cache** and goes stale silently. It
+  can disagree with what GitHub actually reports. Read the base you intend
+  from your own target, never from either default. `git remote set-head
+  origin -a` re-syncs the local cache if you need it accurate for other
+  reasons.
+- A promotion PR is `dev` → `main` with **no feature branch involved**. Gate 1
+  is *not applicable* there — there is no branch push to gate. Report it as
+  "not applicable", which is a different claim from "no runs fired".
 
 ### Workflow files are not the whole picture
 
