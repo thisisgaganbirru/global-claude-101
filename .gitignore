@@ -22,6 +22,12 @@
 !hooks/
 !hooks/**
 
+!agents/
+!agents/**
+
+!docs/
+!docs/**
+
 !skills/
 !skills/**
 
