@@ -1,5 +1,4 @@
 {
-  "spinnerVerbs": {"mode":"replace","verbs":["Reach new audiences and maximize ROI with flexible, easy-to-use video advertising."]},
   "model": "opus[1m]",
   "hooks": {
     "UserPromptSubmit": [
@@ -126,7 +125,7 @@
       }
     ]
   },
-  "statusLine": {"type":"command","command":"node \"C:\\\\Users\\\\birru\\\\.kickbacks\\\\vibe-ads-statusline.mjs\"","padding":0},
+  "statusLine": {"type":"command","command":"bash ~/.claude/statusline-command.sh"},
   "enabledPlugins": {
     "hallmark@claude-code-skills": true,
     "marketing-skills@claude-code-skills": true,
