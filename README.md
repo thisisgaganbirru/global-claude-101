@@ -100,7 +100,7 @@ routing guidance layered on top of stock Claude Code.
 │   └── system-design.md
 └── skills/
     ├── claude-md/
-    ├── code-review-workflow/
+    ├── git-commit-workflow/
     ├── content-strategist/
     ├── docs-audit/
     ├── readme-writer/
