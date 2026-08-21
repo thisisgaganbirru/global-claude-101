@@ -7,11 +7,11 @@ User-global custom subagent (`~/.claude/agents/git-commit.md`, `name: git-commit
 - `agents/git-commit.md` — the agent definition (frontmatter + system prompt body).
 - `hooks/merge_guard.py` — `PreToolUse` gate on `gh pr merge`; the enforcement behind "merge only when clean and mergeable".
 - `settings.json` — registers the guard under `hooks.PreToolUse` (matcher `Bash|PowerShell`, `if: "Bash(gh pr merge*)"`) and allows `Bash(gh pr merge:*)`.
-- `skills/code-review-workflow/SKILL.md` — the rulebook, preloaded into the agent via frontmatter `skills:`. Single source of truth for commit/PR/merge/semver discipline; the agent body holds only agent-specific concerns.
+- `skills/git-commit-workflow/SKILL.md` — the rulebook, preloaded into the agent via frontmatter `skills:`. Single source of truth for commit/PR/merge/semver discipline; the agent body holds only agent-specific concerns.
 
 ## Behavior
 
-Pinned to `model: opus`. Preloads `code-review-workflow` via frontmatter `skills:` (full SKILL.md content injected at startup, not just the description).
+Pinned to `model: opus`. Preloads `git-commit-workflow` via frontmatter `skills:` (full SKILL.md content injected at startup, not just the description).
 
 ### The target gate — what replaces checkpoints
 
@@ -88,6 +88,7 @@ The agent is instructed that a denial is the system working: report it verbatim 
 - Derived from a review of the pre-fix skill, which had eight defects — no YAML frontmatter (so `skills:` could not resolve it, and its registry description was just its H1), hardcoded `resume-agent` infrastructure behind a false "works in any project" claim, a wrong static CI check list, no mention that merging `main` deploys production, four documented-but-unimplemented flags, and a contradiction between the Adjust checkpoint option and the "cannot modify pushed commits" limitation.
 
 ## Changelog
+- 2026-08-21 · Skill renamed `code-review-workflow` → `git-commit-workflow` (directory, frontmatter `name:`, and every internal `/code-review-workflow` self-reference) to match what it actually is — a commit/PR/merge mechanic's rulebook, not a code-quality reviewer (that's `/code-review`, a separate skill). Propagated to this doc, `README.md`, the `git-commit` agent's `skills:` list and body, and every project referencing it by name. Historical dated entries below (and dated `mem/` logs) keep the old name since they describe what was true at that time.
 - 2026-08-15 · Run completed — PR #1 merged to `dev` (`e0ebd7c`). The empirical-discovery fix was validated on its first live run: `gh run list` returned empty and there is no `.github/`, but the check-runs API found a real GitGuardian check. Prediction and observation disagreed; observation won. `merge_guard` denial path confirmed separately against the merged PR. Added a `Pull:` line to the report template — the pull was being performed but had no line accounting for it.
 - 2026-08-15 · First dispatch (target `dev`). Found the App-check detection bug (below) and two authoring errors. Added `hooks/merge_guard.py` as real enforcement for "clean and mergeable", made check discovery empirical, fixed a section cross-reference off-by-one in the agent body.
 - 2026-08-15 · initial version — agent created, `code-review-workflow` skill rewritten with frontmatter, Modes, target model, capability detection, and abort conditions.
