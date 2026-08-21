@@ -1,5 +1,5 @@
 ---
-name: code-review-workflow
+name: git-commit-workflow
 description: >
   Branch, commit, PR, and merge discipline for git repositories using a
   feature → dev → main promotion flow. Use whenever work needs to be turned
@@ -21,7 +21,7 @@ a `feature → dev → main` promotion flow.
 
 This file is the **rulebook**. It is consumed two ways:
 
-- **Interactive mode** — a human invokes `/code-review-workflow` and approves
+- **Interactive mode** — a human invokes `/git-commit-workflow` and approves
   at checkpoints.
 - **Autonomous mode** — the `git-commit` agent preloads this file via its
   `skills:` frontmatter and executes it without checkpoints.
@@ -33,7 +33,7 @@ and applying the wrong one is the main way this workflow goes wrong.
 
 | | Interactive | Autonomous |
 |---|---|---|
-| Invoked by | a human typing `/code-review-workflow` | an orchestrator dispatching `git-commit` |
+| Invoked by | a human typing `/git-commit-workflow` | an orchestrator dispatching `git-commit` |
 | Scope authorized by | checkpoints, mid-run | the **target** argument, at dispatch time |
 | On ambiguity | ask the user | stop and report to the orchestrator |
 | Can fix code / CI failures | yes, if the user asks | **never** — report only |
@@ -69,11 +69,35 @@ Two properties are load-bearing:
 
 1. Run preflight (see [Repository capability detection](#repository-capability-detection)).
 2. Analyze `git status` and the diff; group related changes.
-3. Create a feature branch with a descriptive name.
-4. Organize into **2–6 logical commits**.
-5. Push to remote.
-6. **Gate 1** — if the push started any workflow, wait for it. Green →
+3. **Scope audit** — reconcile the concerns the diff actually contains against
+   the concerns you were told it contains. See [Scope audit](#scope-audit--reconcile-the-diff-against-the-brief).
+4. Create a feature branch with a descriptive name.
+5. Organize into **2–6 logical commits**.
+6. Push to remote.
+7. **Gate 1** — if the push started any workflow, wait for it. Green →
    continue. Red → stop and report. See [CI monitoring](#ci-monitoring).
+
+### Scope audit — reconcile the diff against the brief
+
+Before writing the first commit, list the distinct concerns present in the
+diff of your assigned paths, and compare that list against what the dispatch
+(or the user) said those paths contain. The two routinely disagree: a file
+described as "a small bug fix" also carries a restyle, a rename, a dependency
+bump, or a second unrelated fix that nobody mentioned.
+
+An undescribed concern is not yours to absorb into a neighbouring commit.
+Doing so lands an unreviewed change under a commit message that actively
+conceals it — the most damaging failure available here, because the history
+then reads as though someone approved it.
+
+- **Interactive mode** — surface the extra concern and ask before committing it.
+- **Autonomous mode** — you may still commit it, but only under its own honest
+  subject, and you must name it as undescribed in your report. Never fold it
+  into a commit about something else.
+
+This costs one `git diff` read before you start, and it is the only step that
+catches *"the diff contains more than anyone realised"*. No CI gate and no
+mergeability check will ever tell you this.
 
 ### Commit rules
 
@@ -101,6 +125,40 @@ Two properties are load-bearing:
   to split into separate PRs. Autonomous mode: report the grouping you would
   use and stop — the orchestrator owns scope.
 
+### Splitting one file across several commits
+
+Two concerns often live in the same file and the commit boundary has to run
+through it. **Do not edit the working-tree file to separate them.** That makes
+you the author of a change you were only asked to commit, and the final commit
+would no longer match what you were handed.
+
+Stage synthesized intermediate content as git objects instead, leaving the
+working tree untouched throughout:
+
+```
+git show HEAD:<path> > base              # start from the committed version
+# apply only the hunks belonging to commit 1 to `base`, in a scratch directory
+git hash-object -w --path <path> base    # write the blob
+git update-index --cacheinfo 100644,<blob-sha>,<path>
+```
+
+Commit that, then stage the real working-tree file normally for the final
+commit. Verify at the end that `git diff HEAD -- <path>` is empty: the last
+commit's content must be byte-identical to the file as you received it.
+
+Two traps:
+
+- **Line endings.** `git apply` and shell redirection can emit CRLF where
+  `core.autocrlf=true`, while `.gitattributes` may pin that path to LF.
+  Normalize before hashing or the final commit shows a whole-file line-ending
+  diff. Confirm with `git check-attr text eol -- <path>`.
+- **Intermediate commits are never CI-tested** — only the branch tip and the
+  merge result are. Slice at a boundary where each step is plausibly coherent
+  on its own, and see [Limitations](#limitations).
+
+If no clean seam exists, fall back to a single honest combined commit and say
+so — a truthful combined message beats a split that misdescribes either half.
+
 ## Phase 2 — Checkpoint 1 (interactive mode only)
 
 ⛔ Review commits before a PR exists. The user may:
@@ -123,7 +181,20 @@ requires rewriting pushed history, stop and hand it to the user.
 3. Merge only when they are all green.
 4. **Gate 3** — the merge is a push to `dev`; wait for the workflows it
    started and report their outcome.
-5. Pull to local `dev`.
+5. Bring local `dev` up to the merged state — normally
+   `git checkout dev && git pull`.
+
+   **Exception — when the working tree carries unlanded work.** An
+   orchestrated multi-agent run sharing one checkout, or a user with WIP on
+   disk, makes a checkout destructive: it overwrites or hides work that was
+   never committed. Advance the ref without a checkout instead:
+
+   ```
+   git fetch origin && git branch -f <local-dev-ref> origin/dev
+   ```
+
+   Say which of the two you did, and why, in the report. Never reach for
+   `stash`, `clean`, or `reset --hard` to make a checkout possible.
 
 ## Phase 4 — Checkpoint 2 (interactive mode only)
 
@@ -140,7 +211,8 @@ expressed earlier.
 3. Apply exactly one `semver:*` label **if the repository uses them** — see
    [Release labeling](#release-labeling).
 4. **Gate 2** — monitor applicable checks; merge only when green.
-5. Merge, pull to local `main`.
+5. Merge, then bring local `main` up to the merged state — same rule and same
+   unlanded-work exception as Phase 3 step 5.
 6. **Gate 3** — the merge is a push to `main`. Wait for what it started
    (post-merge tests, tagging, image builds, deploys) and report each outcome.
 7. Confirm any release tag was cut.
@@ -162,8 +234,8 @@ Run these before any write:
 git status --porcelain            git branch -a
 git branch --show-current         git remote -v
 git log --oneline <base>..HEAD    gh auth status
-ls .github/workflows/             gh label list
-gh api repos/:owner/:repo/rulesets
+ls .github/workflows/             gh api repos/:owner/:repo/rulesets
+gh label list                   # only when the target is `main`
 ```
 
 Build a profile from the results:
@@ -177,8 +249,62 @@ Build a profile from the results:
 | `semver:*` labels exist | `gh label list` | whether Phase 5 step 3 applies at all |
 | required status checks | `gh api …/rulesets` | what will block the merge |
 | merging deploys anything | push-triggered workflows that deploy or watch a deploy | what to warn about before merging |
+| required checks running repo-local validators | the check's own workflow step — see below | whether your staged set is even legal |
 
 A repository that cannot be classified is an abort condition, not a guess.
+
+**Only list labels when the target is `main`.** Release labels apply to
+`dev` → `main` PRs and nowhere else, so listing them and reasoning about a
+bump is wasted work on every other target. Skip the lookup and record
+"not applicable — target is not `main`".
+
+**A handed profile is verified, not trusted — and not rediscovered.** An
+orchestrator running several dispatches against one repository may pass you
+the profile it already established: the applicable check names, the gate
+classification, whether merging deploys. Where one is supplied, spot-check
+the few facts your run actually depends on instead of re-deriving all of it,
+and say in the report that you verified a handed profile rather than built
+one. Where none is supplied, derive it yourself — **never assume a
+predecessor ran.** A handed profile is a shortcut through detection, never a
+substitute for observing your own SHA and your own PR.
+
+### Required checks: read every step, not just the named script
+
+Some required checks do not merely build and test — they enforce a structural
+rule: migration numbering, changelog entries, generated files being current,
+naming conventions, license headers.
+
+When a required check touches the kind of file you are staging, read **the
+whole job** during preflight and reason about whether your staged set satisfies
+each step. Then check the dependency chain the job actually installs — an
+`-r other-requirements.txt` include can mean the file you edited is not the
+file the test environment reads.
+
+**Read the job, not the step whose name you recognise.** A job named for one
+purpose routinely runs several: a `Migration Validation` job may *validate
+numbering* in one step and then *apply every migration to a clean database* in
+the next. Those enforce completely different properties, and a change can
+satisfy one while violating the other. Reading only the step whose name matches
+your change produces a confident, wrong "preflight passed" — and the failure
+still arrives at Gate 2, just with the preflight now vouching for it.
+
+Enumerate the job's steps. For each, ask what property it enforces and whether
+your staged set holds that property.
+
+This is not "compensating". You are not running the validator and not
+manufacturing a green result — you are reading rules that are already written
+down and checking your change against them before spending a push and a full PR
+cycle to discover them. Cheap, static, read-only.
+
+It catches the failure mode where a change is individually correct but invalid
+*in combination*: a file that only becomes legal once sibling files land, or a
+set that has to arrive together to stay consistent. That is a scope problem,
+and scope belongs to the orchestrator or the user — so surfacing it at
+preflight instead of at Gate 2 is the difference between asking a question and
+abandoning a pushed PR.
+
+Reading the validator never substitutes for the check itself. CI remains the
+authority; a preflight reading that looks fine does not let you skip Gate 2.
 
 ### Reading workflow triggers
 
@@ -279,6 +405,15 @@ CI is still running, and do not open it at all if branch CI failed.
 If nothing fires for that SHA after the grace period, there is nothing to wait
 for — proceed.
 
+**Scale the wait to what preflight predicted.** If preflight found a workflow
+whose `push:` trigger matches this branch, wait for it properly. If it found
+none, a single short confirmation poll is enough — you are checking for App
+check runs that no workflow file predicts, not waiting on a run you have any
+reason to expect. Do not spend a full grace period rediscovering a "none"
+preflight already established. The poll still happens: it is what converts a
+prediction into an observation, and it is why this stays one poll rather than
+zero.
+
 ### Gate 2 — on the pull request, before merging
 
 Two conditions, both required. They are different things and passing one says
@@ -339,6 +474,41 @@ Two rules for this case:
   manufacture a signal the repository does not produce. That is outside this
   workflow's boundary, and a locally-invented green reads in the report like
   validation that never happened.
+
+### What counts as verification
+
+Whenever anyone claims something was verified — you, the orchestrator, or a
+dispatch brief — the claim is only worth what the check actually executed.
+
+**A verification that skips the thing it claims to verify is worse than no
+verification**, because it converts an unknown into false confidence, and false
+confidence is what gets reported.
+
+The recurring ways this goes wrong:
+
+| Claim | What it actually proves |
+|---|---|
+| "it compiles" / syntax check passes | nothing about runtime — undefined names, bad attributes, wrong types all survive |
+| "the tests pass" after filtering (`-k`, `--ignore`, a marker) | nothing about the tests the filter removed — often exactly the ones you changed |
+| "I verified the logic" via a script that re-implements the assertions | the re-implementation works; the real file was never executed |
+| "the file looks right" from a partial read | nothing outside the window you read |
+
+Three rules follow:
+
+- **Name the scope of any verification you report.** "19 passed" and "11 passed,
+  8 deselected" are different claims. Report which one is true, including what
+  was excluded and why.
+- **If a check cannot run in your environment, say so plainly** and let CI be
+  the authority. A missing dependency is a fine reason; silently narrowing the
+  run until it goes green is not.
+- **Treat verification claims in a dispatch as context, not proof.** A brief
+  saying "I already ran the tests" does not discharge the scope audit. Re-audit
+  the diff you were handed; the claim tells you what someone *believes* is true.
+
+This is also why a partial read is dangerous before an edit: a replacement
+built from a truncated view of a file can silently orphan whatever sat just
+past the window. Read to a real boundary — the end of the function, class, or
+block you are changing — not to a convenient line count.
 
 ### Mechanics
 
@@ -438,3 +608,12 @@ Stop and report. Do not work around any of these:
 - Cannot resolve merge conflicts.
 - Cannot override ruleset or required-check policy — that needs repo admin.
 - Cannot modify pushed commits (would require force-push, which is barred).
+- **Intermediate commits are never independently verified.** CI runs against
+  the branch tip and the merge result — never against the commits in between —
+  and this workflow bars running builds locally to fill that gap. So a commit
+  in the middle of a series can fail to build while the PR is entirely green.
+  That matters precisely because not squashing exists for cherry-pick
+  precision: cherry-picking a non-building commit inherits the breakage, which
+  is the one thing the no-squash invariant is meant to prevent. Mitigate by
+  choosing commit boundaries where each step is plausibly coherent alone.
+  Nothing here guarantees it, and the report should not imply otherwise.
