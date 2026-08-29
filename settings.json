@@ -125,7 +125,11 @@
       }
     ]
   },
-  "statusLine": {"type":"command","command":"bash ~/.claude/statusline-command.sh"},
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline-command.sh",
+    "refreshInterval": 5
+  },
   "enabledPlugins": {
     "hallmark@claude-code-skills": true,
     "marketing-skills@claude-code-skills": true,
