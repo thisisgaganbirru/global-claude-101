@@ -65,13 +65,29 @@ jstr() { if [[ $input =~ \"$1\":\"([^\"]*)\" ]]; then REPLY=${BASH_REMATCH[1]}; 
 # Safe for keys that occur once, or where the caller only wants the first.
 jint() { if [[ $input =~ \"$1\":([0-9]+) ]]; then REPLY=${BASH_REMATCH[1]}; else REPLY=; fi; }
 
-# Like jint but binds to the FIRST occurrence of the key even when its value is
-# null. Needed for "used_percentage", which appears three times (context_window,
-# then each rate-limit window): with `[0-9]+` a null context percentage fails to
-# match at the first key, and the leftmost-match rule silently hands back
-# five_hour's number instead. `[0-9]*` matches zero digits there, so REPLY comes
-# back empty and the caller's `${PCT:-0}` applies — the old grep's behaviour.
-jint1() { if [[ $input =~ \"$1\":([0-9]*) ]]; then REPLY=${BASH_REMATCH[1]}; else REPLY=; fi; }
+# "key":<int>, looked up only in the part of the payload AFTER "container"
+# appears. For "used_percentage", which occurs three times — context_window, then
+# each rate-limit window — an unanchored match is decided by key order, so a
+# reordering upstream would silently report five_hour's number as the context
+# percentage. Discarding everything up to the container name removes that
+# coupling in both directions: a rate-limit window before context_window is cut
+# away, and one after it is never reached.
+#
+# `${input#*...}` is prefix removal, a parameter expansion — a builtin, so
+# anchoring costs no fork. Bash ERE has no non-greedy quantifier, which is why
+# this is done by trimming the subject rather than by a cleverer regex.
+#
+# `[0-9]*` (zero-or-more, not one-or-more) is deliberate: on
+# "used_percentage":null it matches zero digits and returns empty, so the
+# caller's `${PCT:-0}` applies. With `+` the match would fail at that key and
+# the leftmost-match rule would hand back the next window's number instead.
+# The docs list context_window.used_percentage as nullable early in a session.
+jafter() {
+  local tail
+  if [[ $input != *"\"$1\""* ]]; then REPLY=; return; fi   # container absent -> empty, never a fallthrough
+  tail=${input#*"\"$1\""}
+  if [[ $tail =~ \"$2\":([0-9]*) ]]; then REPLY=${BASH_REMATCH[1]}; else REPLY=; fi
+}
 
 # First "key":<number>, decimals kept — for total_cost_usd, which needs %.2f.
 jnum() { if [[ $input =~ \"$1\":([0-9.]+) ]]; then REPLY=${BASH_REMATCH[1]}; else REPLY=; fi; }
@@ -104,7 +120,7 @@ case "$MODEL" in
   *) MODEL_COLOR="$GREEN" ;;
 esac
 # Extract context percentage (first used_percentage in the JSON)
-jint1 used_percentage; PCT=$REPLY
+jafter context_window used_percentage; PCT=$REPLY
 PCT=${PCT:-0}
 
 # Extract 5-hour rate limit
